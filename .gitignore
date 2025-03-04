@@ -1,0 +1,16 @@
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+
+# Virtual environment
+.venv/
+.python-version
+
+# Test cache
+.pytest_cache/
+
+# Generated files
+data/
+src/uts46/_version.py

@@ -1,0 +1,154 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.13
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.13"
+        cache: "pip"
+
+    - name: Install lint tools
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install '.[lint]'
+
+    - name: Check generated data
+      # Verify the checked in _data.py matches what would be generated
+      run: |
+        python tools/generate-data.py
+        git diff --exit-code src/uts46/_data.py
+
+    - name: ruff check
+      run: python -m ruff check .
+
+    - name: ruff format
+      run: python -m ruff format --check .
+
+    - name: mypy
+      run: python -m mypy .
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        # Need history for hatch-vcs to calculate version
+        fetch-depth: 0
+
+    - name: Set up Python 3.13
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.13"
+        cache: "pip"
+
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install build twine
+
+    - name: Build distribution
+      run: |
+        python -m build
+
+    - name: Check metadata
+      run: |
+        python -m twine check dist/*
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: dist
+        path: dist/
+        retention-days: 7
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: "pip"
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: dist
+        path: dist/
+
+    - name: Install distribution and test dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install --find-links=dist/ 'uts46[test]'
+
+    - name: Run tests
+      run: |
+        python tests
+
+  publish:
+    needs: [lint, build, test]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: pypi
+      url: https://pypi.org/p/uts46
+    permissions:
+      # Required for PyPI trusted publishing
+      id-token: write
+
+    steps:
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: dist
+        path: dist/
+
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+
+  release:
+    needs: [publish]
+    runs-on: ubuntu-latest
+    permissions:
+      # Required for GitHub release
+      contents: write
+
+    steps:
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: dist
+        path: dist/
+
+    - name: Release to GitHub
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        TAG_NAME=${GITHUB_REF#refs/tags/v}
+        if ! gh release create "$TAG_NAME" \
+          --title "Release $TAG_NAME" \
+          --generate-notes \
+          ./dist/*
+        then
+          # Release likely already exists; just add the distribution
+          gh release upload "$TAG_NAME" ./dist/* --clobber
+        fi
