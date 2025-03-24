@@ -145,10 +145,14 @@ jobs:
       run: |
         TAG_NAME=${GITHUB_REF#refs/tags/v}
         if ! gh release create "$TAG_NAME" \
+          --repo "$GITHUB_REPOSITORY" \
           --title "Release $TAG_NAME" \
           --generate-notes \
           ./dist/*
         then
           # Release likely already exists; just add the distribution
-          gh release upload "$TAG_NAME" ./dist/* --clobber
+          gh release upload "$TAG_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber \
+            ./dist/*
         fi
