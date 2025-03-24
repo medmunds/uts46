@@ -1,7 +1,7 @@
 # UTS46: Unicode Compatibility Processing for Internationalized Domain Names
 
-![CI](https://github.com/medmunds/ut46/actions/workflows/ci.yml/badge.svg?branch=main&event=push)
-![PyPI](https://img.shields.io/pypi/v/uts46)
+[![CI](https://github.com/medmunds/uts46/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/medmunds/uts46/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/uts46)](https://pypi.org/project/uts46/)
 
 
 A Python implementation of [Unicode Technical Standard #46][UTS46], *Unicode
