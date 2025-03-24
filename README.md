@@ -85,8 +85,8 @@ documentation for [`encode()`][encode] and [`decode()`][decode] for details.
 Failed validation checks and other problems will raise `uts46.Uts46Error`,
 a subclass of `UnicodeError`.
 
-[encode]: ./blob/main/src/uts46/uts46.py#:~:text=def%20encode
-[decode]: ./blob/main/src/uts46/uts46.py#:~:text=def%20decode
+[encode]: ./src/uts46/uts46.py#:~:text=def%20encode
+[decode]: ./src/uts46/uts46.py#:~:text=def%20decode
 
 
 ### Transitional processing
@@ -157,11 +157,11 @@ See each function's inline documentation for more information.
 or that are imported from a submodule beginning with an underscore. These are
 not part of the uts46 public API, and they may change without notice.)
 
-[main_processing]: ./blob/main/src/uts46/uts46.py#:~:text=def%20main_processing
-[validate_label]: ./blob/main/src/uts46/uts46.py#:~:text=def%20validate_label
-[to_ascii]: ./blob/main/src/uts46/uts46.py#:~:text=def%20to_ascii
-[to_unicode]: ./blob/main/src/uts46/uts46.py#:~:text=def%20to_unicode
-[preprocessing_for_idna2008]: ./blob/main/src/uts46/uts46.py#:~:text=def%20preprocessing_for_idna2008
+[main_processing]: ./src/uts46/uts46.py#:~:text=def%20main_processing
+[validate_label]: ./src/uts46/uts46.py#:~:text=def%20validate_label
+[to_ascii]: ./src/uts46/uts46.py#:~:text=def%20to_ascii
+[to_unicode]: ./src/uts46/uts46.py#:~:text=def%20to_unicode
+[preprocessing_for_idna2008]: ./src/uts46/uts46.py#:~:text=def%20preprocessing_for_idna2008
 
 ### WHATWG IDNA algorithms
 
@@ -182,8 +182,8 @@ keyword arguments. See the [`domain_to_ascii()`][domain_to_ascii] and
 [`domain_to_unicode()`][domain_to_unicode] inline documentation for details.
 
 [WHATWG]: https://url.spec.whatwg.org/#idna
-[domain_to_ascii]: ./blob/main/src/uts46/whatwg.py#:~:text=def%20domain_to_ascii
-[domain_to_unicode]: ./blob/main/src/uts46/whatwg.py#:~:text=def%20domain_to_unicode
+[domain_to_ascii]: ./src/uts46/whatwg.py#:~:text=def%20domain_to_ascii
+[domain_to_unicode]: ./src/uts46/whatwg.py#:~:text=def%20domain_to_unicode
 
 ## Difference from idna package
 
