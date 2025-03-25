@@ -101,18 +101,11 @@ def parse_mapping_table(file_path: Path) -> list[IdnaMappingEntry]:
         mapping = None
         if len(fields) >= 3 and fields[2]:
             mapping = udu.parse_codepoint_sequence_field(fields[2])
-            if status == "mapped" and all(
-                mapping == chr(cp).casefold() for cp in range(start, end + 1)
-            ):
-                status = "casefold"
-                mapping = None
 
         if status == "valid":
             assert mapping is None, (
                 f"Unexpected mapping for valid range: {line_num}: {content}"
             )
-            if all(chr(cp) == chr(cp).casefold() for cp in range(start, end + 1)):
-                status = "casefold"
 
         ranges.append(
             IdnaMappingEntry(
