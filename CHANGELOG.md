@@ -1,6 +1,8 @@
 # uts46 changelog
 
-## Unreleased changes
+## v0.2.0
+
+*2025-03-25*
 
 ### Fixes
 
