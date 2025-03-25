@@ -98,7 +98,13 @@ jobs:
     - name: Install distribution and test dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install --find-links=dist/ 'uts46[test]'
+        WHEEL="$(ls ./dist/*.whl)"
+        if [ -z "$WHEEL" ]; then
+          echo "No dist/*.whl found"
+          exit 1
+        fi
+        echo $WHEEL
+        python -m pip install "${WHEEL}[test]"
 
     - name: Run tests
       run: |
