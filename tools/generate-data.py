@@ -70,6 +70,10 @@ class IdnaMappingEntry:
     line_num: int | None = None
     comment: str | None = None
 
+    # Difference between mapping's codepoint and start,
+    # if start == end and mapping is a single character
+    offset: int | None = None
+
     def __post_init__(self) -> None:
         if self.status == "deviation" and self.mapping is None:
             # An empty deviation maps to empty string, not None
@@ -80,14 +84,42 @@ class IdnaMappingEntry:
         else:
             assert self.mapping is None, f"Range has unexpected mapping: {self}"
 
+        if (
+            self.status == "mapped"
+            and self.start == self.end
+            and self.mapping is not None
+            and len(self.mapping) == 1
+        ):
+            self.offset = ord(self.mapping) - self.start
+
     def __str__(self) -> str:
-        mapping_str = f", mapping={self.mapping}" if self.mapping else ""
-        line_num_str = f", line_num={self.line_num}" if self.line_num else ""
-        comment_str = f", comment={self.comment!r}" if self.comment else ""
-        return (
-            f"CodePointRange(start=0x{self.start:04X}, end=0x{self.end:04X},"
-            f" status={self.status!r}{mapping_str}{line_num_str}{comment_str})"
-        )
+        info = f"start=0x{self.start:04X}, end=0x{self.end:04X}, status={self.status!r}"
+        if self.mapping is not None:
+            info += f", mapping={self.mapping!r}"
+        if self.line_num is not None:
+            info += f", line_num={self.line_num}"
+        if self.offset is not None:
+            info += f", offset={self.offset}"
+        if self.comment is not None:
+            info += f", comment={self.comment!r}"
+        return f"{self.__class__.__name__}({info})"
+
+    def merge(self, other: "IdnaMappingEntry") -> None:
+        """
+        Update self to combine other's start-end range and comment.
+
+        Caller is responsible for ensuring remaining properties are compatible.
+        """
+        self.start = min(self.start, other.start)
+        self.end = max(self.end, other.end)
+
+        if self.comment is None:
+            self.comment = other.comment
+        elif other.comment is not None:
+            # Merge comments.
+            left, *_ = self.comment.split("..")
+            *_, right = other.comment.rsplit("..")
+            self.comment = f"{left}..{right}"
 
 
 def parse_mapping_table(file_path: Path) -> list[IdnaMappingEntry]:
@@ -101,18 +133,11 @@ def parse_mapping_table(file_path: Path) -> list[IdnaMappingEntry]:
         mapping = None
         if len(fields) >= 3 and fields[2]:
             mapping = udu.parse_codepoint_sequence_field(fields[2])
-            if status == "mapped" and all(
-                mapping == chr(cp).casefold() for cp in range(start, end + 1)
-            ):
-                status = "casefold"
-                mapping = None
 
         if status == "valid":
             assert mapping is None, (
                 f"Unexpected mapping for valid range: {line_num}: {content}"
             )
-            if all(chr(cp) == chr(cp).casefold() for cp in range(start, end + 1)):
-                status = "casefold"
 
         ranges.append(
             IdnaMappingEntry(
@@ -147,38 +172,66 @@ def extract_deviations(ranges: list[IdnaMappingEntry]) -> dict[CodePoint, str]:
     return deviations
 
 
-def optimize_ranges(ranges: list[IdnaMappingEntry]) -> None:
+def optimize_ranges(ranges: list[IdnaMappingEntry]) -> list[IdnaMappingEntry]:
     """
-    Optimize the ranges in place by merging adjacent ranges.
+    Optimize by combining ranges where possible.
     """
     print(f"Optimizing {len(ranges)} ranges...", file=sys.stderr)
 
     # Ranges should already be sorted, but just in case...
     ranges.sort(key=lambda r: r.start)
 
-    # Merge adjacent ranges with same properties
-    i = 0
-    while i < len(ranges) - 1:
-        curr = ranges[i]
-        next_r = ranges[i + 1]
-        if (
-            curr.end + 1 == next_r.start
-            and curr.status == next_r.status
-            and curr.mapping == next_r.mapping
-        ):
-            # Merge ranges
-            curr.end = next_r.end
-            if curr.comment and next_r.comment:
-                left, *_ = curr.comment.split("..")
-                *_, right = next_r.comment.rsplit("..")
-                curr.comment = f"{left}..{right}"
-            elif next_r.comment:
-                curr.comment = f"..{next_r.comment}"
-            del ranges[i + 1]
-        else:
-            i += 1
+    # Pass 1: Merge adjacent ranges with compatible properties.
+    merged_ranges: list[IdnaMappingEntry] = []
+    last: IdnaMappingEntry | None = None
+    for curr in ranges:
+        if last:
+            # Combine equivalent entries
+            if last.status == curr.status and last.mapping == curr.mapping:
+                last.merge(curr)
+                continue
+            # Optimization: combine mapped entries with the same offset,
+            # to reduce the number of individual items in the `mapped` dict.
+            # (Occurs frequently for alphabetic ranges.)
+            if (
+                curr.status == "mapped"
+                and curr.offset is not None
+                and last.status in {"offset", "mapped"}
+                and last.offset == curr.offset
+            ):
+                last.status = "offset"
+                last.mapping = None
+                last.merge(curr)
+                continue
+        merged_ranges.append(curr)
+        last = curr
 
-    print(f"  {len(ranges)} ranges after merging", file=sys.stderr)
+    print(f"  {len(merged_ranges)} ranges after merging", file=sys.stderr)
+
+    # Pass 2: Merge compatible ranges that are separated only by "mapped" entries.
+    # This works because Uts46MappingTable always checks the `mapped` dict first.
+    elided_ranges: list[IdnaMappingEntry] = []
+    last = None
+    for curr in merged_ranges:
+        if curr.status == "mapped":
+            elided_ranges.append(curr)
+            continue
+        if (
+            last is not None
+            and last.status == curr.status
+            and last.mapping == curr.mapping
+            and last.offset == curr.offset
+        ):
+            last.merge(curr)
+            continue
+        elided_ranges.append(curr)
+        last = curr
+
+    print(
+        f"  {len(elided_ranges)} ranges after eliding around 'mapped'", file=sys.stderr
+    )
+
+    return elided_ranges
 
 
 def generate_dict_arg(
@@ -209,6 +262,17 @@ def generate_rangelist_arg(
             yield f"{space}{space}0x{start:04X},"
         else:
             yield f"{space}{space}(0x{start:04X}, 0x{end:04X}),"
+    yield f"{space}],"
+
+
+def generate_offsetlist_arg(
+    name: str, ranges: list[IdnaMappingEntry], *, indent: int = 4
+) -> Iterator[str]:
+    """Generate argument initializer for an offset list."""
+    space = " " * indent
+    yield f"{space}{name}=["
+    for r in ranges:
+        yield f"{space}{space}((0x{r.start:04X}, 0x{r.end:04X}), {r.offset}),"
     yield f"{space}],"
 
 
@@ -295,12 +359,11 @@ def generate_uts46_mapping(
     yield f'    unidata_version="{unidata_version}",'
 
     # Emit non-mapped statuses as range lists (skipping default disallowed status)
-    for status, ranges in status_ranges.items():
-        if status in {"mapped", "disallowed"}:
-            continue
-        yield from generate_rangelist_arg(status, ranges)
+    yield from generate_rangelist_arg("valid", status_ranges.get("valid", []))
+    yield from generate_rangelist_arg("ignored", status_ranges.get("ignored", []))
 
-    # Emit mapped statuses as dict
+    # Emit mapped statuses
+    yield from generate_offsetlist_arg("offset", status_ranges.get("offset", []))
     yield from generate_dict_arg("mapped", mapped)
 
     yield ")"
@@ -359,7 +422,7 @@ def generate_data_file() -> None:
     )
     ranges = parse_mapping_table(mapping_path)
     deviations = extract_deviations(ranges)
-    optimize_ranges(ranges)
+    ranges = optimize_ranges(ranges)
 
     # Download and parse the joining types table
     joining_path, joining_url = udu.get_unicode_file(

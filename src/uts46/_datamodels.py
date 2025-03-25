@@ -55,20 +55,18 @@ class Uts46MappingTable:
     data and memory usage, while maintaining fast lookup.
 
     Initialization data is:
-    - Lists of `valid`, `ignored`, and `casefold` (see below) codepoint ranges.
+    - Lists of `valid` and `ignored` codepoint ranges.
       - Each list can mix (int, int) tuple ranges and single codepoints.
       - Deviation codepoints must be included in the `valid` ranges (see below).
     - A dict of `mapped` codepoints, whose values are the mapped strings.
+    - A list of `offset` codepoint ranges, which defines "mapped" codepoints
+      at a fixed offset from the original codepoint. (This is an optimization
+      that reduces the size of the `mapped` dict.)
     - All other codepoints are treated as disallowed.
 
     For non-transitional processing, deviation codepoints are handled the same
     as valid ones. So as an optimization, they are just stored as valid here.
     (See UTS46 section 4 processing step 1 and section 4.1 validation step 7.)
-
-    `casefold` is an optimization to minimize initialization data size. It allows
-    coalescing ranges of codepoints where the lowercase character is valid and
-    the uppercase character is mapped to lowercase, without needing to store
-    the mapped values. (Such ranges are common for alphabets.)
     """
 
     # Version of UTS46 IDNA Mapping Table used to generate this data.
@@ -77,33 +75,26 @@ class Uts46MappingTable:
     # Python unicodedata.unidata_version during data generation.
     unidata_version: str
 
-    class _Status(IntEnum):
-        # MAPPED, DEVIATION and DISALLOWED never appear in _cp_status.
-        # CASEFOLD represents either VALID or MAPPED to its own casefold value.
-        VALID = Status.VALID
-        IGNORED = Status.IGNORED
-        CASEFOLD = 5
-
-        assert CASEFOLD not in Status.__members__
-
-    _cp_status: RangeMap[CodePoint, _Status]
+    # The Status or offset for each codepoint
+    _cp_status: RangeMap[CodePoint, Status | int]
     _mapped: dict[CodePoint, str]
+    _default_status = Status.DISALLOWED
 
     def __init__(
         self,
         *,
         valid: CodePointList,
         ignored: CodePointList,
-        casefold: CodePointList,
+        offset: list[tuple[CodePointRange, int]],
         mapped: dict[CodePoint, str],
         data_version: str | None = None,
         unidata_version: str | None = None,
     ):
         self._cp_status = RangeMap(
             chain(
-                _expand_codepoint_list(valid, Uts46MappingTable._Status.VALID),
-                _expand_codepoint_list(ignored, Uts46MappingTable._Status.IGNORED),
-                _expand_codepoint_list(casefold, Uts46MappingTable._Status.CASEFOLD),
+                _expand_codepoint_list(valid, Status.VALID),
+                _expand_codepoint_list(ignored, Status.IGNORED),
+                offset,
             )
         )
         self._mapped = mapped
@@ -118,13 +109,10 @@ class Uts46MappingTable:
         cp = ord(char)
         if cp in self._mapped:
             return Status.MAPPED
-        _status = self._cp_status.get(cp)
-        if _status is None:
-            return Status.DISALLOWED
-        elif _status == Uts46MappingTable._Status.CASEFOLD:
-            return Status.VALID if char == char.casefold() else Status.MAPPED
-        else:
-            return Status(_status.value)
+        _status = self._cp_status.get(cp, self._default_status)
+        if not isinstance(_status, Status):
+            _status = Status.MAPPED  # offset means mapped
+        return _status
 
     def is_valid(self, char: str) -> bool:
         """
@@ -141,17 +129,17 @@ class Uts46MappingTable:
         cp = ord(char)
         result = self._mapped.get(cp)
         if result is None:
-            status = self._cp_status.get(ord(char))
-            if status == Uts46MappingTable._Status.VALID or status is None:
-                # valid or disallowed
+            status = self._cp_status.get(ord(char), self._default_status)
+            if status in {Status.VALID, Status.DISALLOWED}:
                 result = char
-            elif status == Uts46MappingTable._Status.IGNORED:
+            elif status == Status.IGNORED:
                 result = ""
-            elif status == Uts46MappingTable._Status.CASEFOLD:
-                # valid or mapped to its own casefold
-                result = char.casefold()
+            elif not isinstance(status, Status):
+                result = chr(cp + status)  # offset
             else:
-                raise ValueError(f"Unknown status: {status}") from None
+                # Status.MAPPED was covered by _mapped or offset above.
+                # Status.DEVIATION should use VALID in non-transitional table.
+                raise ValueError(f"Unknown status for {cp:#06x}: {status!r}")
         return result
 
 
