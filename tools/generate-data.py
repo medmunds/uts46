@@ -174,15 +174,15 @@ def extract_deviations(ranges: list[IdnaMappingEntry]) -> dict[CodePoint, str]:
 
 def optimize_ranges(ranges: list[IdnaMappingEntry]) -> list[IdnaMappingEntry]:
     """
-    Optimize the ranges in place by merging adjacent ranges.
+    Optimize by combining ranges where possible.
     """
     print(f"Optimizing {len(ranges)} ranges...", file=sys.stderr)
 
     # Ranges should already be sorted, but just in case...
     ranges.sort(key=lambda r: r.start)
 
-    # Merge adjacent ranges with compatible properties
-    result: list[IdnaMappingEntry] = []
+    # Pass 1: Merge adjacent ranges with compatible properties.
+    merged_ranges: list[IdnaMappingEntry] = []
     last: IdnaMappingEntry | None = None
     for curr in ranges:
         if last:
@@ -203,11 +203,35 @@ def optimize_ranges(ranges: list[IdnaMappingEntry]) -> list[IdnaMappingEntry]:
                 last.mapping = None
                 last.merge(curr)
                 continue
-        result.append(curr)
+        merged_ranges.append(curr)
         last = curr
 
-    print(f"  {len(result)} ranges after merging", file=sys.stderr)
-    return result
+    print(f"  {len(merged_ranges)} ranges after merging", file=sys.stderr)
+
+    # Pass 2: Merge compatible ranges that are separated only by "mapped" entries.
+    # This works because Uts46MappingTable always checks the `mapped` dict first.
+    elided_ranges: list[IdnaMappingEntry] = []
+    last = None
+    for curr in merged_ranges:
+        if curr.status == "mapped":
+            elided_ranges.append(curr)
+            continue
+        if (
+            last is not None
+            and last.status == curr.status
+            and last.mapping == curr.mapping
+            and last.offset == curr.offset
+        ):
+            last.merge(curr)
+            continue
+        elided_ranges.append(curr)
+        last = curr
+
+    print(
+        f"  {len(elided_ranges)} ranges after eliding around 'mapped'", file=sys.stderr
+    )
+
+    return elided_ranges
 
 
 def generate_dict_arg(
