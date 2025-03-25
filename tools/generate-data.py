@@ -70,6 +70,10 @@ class IdnaMappingEntry:
     line_num: int | None = None
     comment: str | None = None
 
+    # Difference between mapping's codepoint and start,
+    # if start == end and mapping is a single character
+    offset: int | None = None
+
     def __post_init__(self) -> None:
         if self.status == "deviation" and self.mapping is None:
             # An empty deviation maps to empty string, not None
@@ -80,14 +84,25 @@ class IdnaMappingEntry:
         else:
             assert self.mapping is None, f"Range has unexpected mapping: {self}"
 
+        if (
+            self.status == "mapped"
+            and self.start == self.end
+            and self.mapping is not None
+            and len(self.mapping) == 1
+        ):
+            self.offset = ord(self.mapping) - self.start
+
     def __str__(self) -> str:
-        mapping_str = f", mapping={self.mapping}" if self.mapping else ""
-        line_num_str = f", line_num={self.line_num}" if self.line_num else ""
-        comment_str = f", comment={self.comment!r}" if self.comment else ""
-        return (
-            f"CodePointRange(start=0x{self.start:04X}, end=0x{self.end:04X},"
-            f" status={self.status!r}{mapping_str}{line_num_str}{comment_str})"
-        )
+        info = f"start=0x{self.start:04X}, end=0x{self.end:04X}, status={self.status!r}"
+        if self.mapping is not None:
+            info += f", mapping={self.mapping!r}"
+        if self.line_num is not None:
+            info += f", line_num={self.line_num}"
+        if self.offset is not None:
+            info += f", offset={self.offset}"
+        if self.comment is not None:
+            info += f", comment={self.comment!r}"
+        return f"{self.__class__.__name__}({info})"
 
     def merge(self, other: "IdnaMappingEntry") -> None:
         """
@@ -166,15 +181,30 @@ def optimize_ranges(ranges: list[IdnaMappingEntry]) -> list[IdnaMappingEntry]:
     # Ranges should already be sorted, but just in case...
     ranges.sort(key=lambda r: r.start)
 
-    # Merge adjacent ranges with same properties
+    # Merge adjacent ranges with compatible properties
     result: list[IdnaMappingEntry] = []
     last: IdnaMappingEntry | None = None
     for curr in ranges:
-        if last and last.status == curr.status and last.mapping == curr.mapping:
-            last.merge(curr)
-        else:
-            result.append(curr)
-            last = curr
+        if last:
+            # Combine equivalent entries
+            if last.status == curr.status and last.mapping == curr.mapping:
+                last.merge(curr)
+                continue
+            # Optimization: combine mapped entries with the same offset,
+            # to reduce the number of individual items in the `mapped` dict.
+            # (Occurs frequently for alphabetic ranges.)
+            if (
+                curr.status == "mapped"
+                and curr.offset is not None
+                and last.status in {"offset", "mapped"}
+                and last.offset == curr.offset
+            ):
+                last.status = "offset"
+                last.mapping = None
+                last.merge(curr)
+                continue
+        result.append(curr)
+        last = curr
 
     print(f"  {len(result)} ranges after merging", file=sys.stderr)
     return result
@@ -208,6 +238,17 @@ def generate_rangelist_arg(
             yield f"{space}{space}0x{start:04X},"
         else:
             yield f"{space}{space}(0x{start:04X}, 0x{end:04X}),"
+    yield f"{space}],"
+
+
+def generate_offsetlist_arg(
+    name: str, ranges: list[IdnaMappingEntry], *, indent: int = 4
+) -> Iterator[str]:
+    """Generate argument initializer for an offset list."""
+    space = " " * indent
+    yield f"{space}{name}=["
+    for r in ranges:
+        yield f"{space}{space}((0x{r.start:04X}, 0x{r.end:04X}), {r.offset}),"
     yield f"{space}],"
 
 
@@ -294,12 +335,11 @@ def generate_uts46_mapping(
     yield f'    unidata_version="{unidata_version}",'
 
     # Emit non-mapped statuses as range lists (skipping default disallowed status)
-    for status, ranges in status_ranges.items():
-        if status in {"mapped", "disallowed"}:
-            continue
-        yield from generate_rangelist_arg(status, ranges)
+    yield from generate_rangelist_arg("valid", status_ranges.get("valid", []))
+    yield from generate_rangelist_arg("ignored", status_ranges.get("ignored", []))
 
-    # Emit mapped statuses as dict
+    # Emit mapped statuses
+    yield from generate_offsetlist_arg("offset", status_ranges.get("offset", []))
     yield from generate_dict_arg("mapped", mapped)
 
     yield ")"

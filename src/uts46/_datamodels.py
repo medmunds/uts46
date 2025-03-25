@@ -59,6 +59,9 @@ class Uts46MappingTable:
       - Each list can mix (int, int) tuple ranges and single codepoints.
       - Deviation codepoints must be included in the `valid` ranges (see below).
     - A dict of `mapped` codepoints, whose values are the mapped strings.
+    - A list of `offset` codepoint ranges, which defines "mapped" codepoints
+      at a fixed offset from the original codepoint. (This is an optimization
+      that reduces the size of the `mapped` dict.)
     - All other codepoints are treated as disallowed.
 
     For non-transitional processing, deviation codepoints are handled the same
@@ -72,14 +75,17 @@ class Uts46MappingTable:
     # Python unicodedata.unidata_version during data generation.
     unidata_version: str
 
-    _cp_status: RangeMap[CodePoint, Status]
+    # The Status or offset for each codepoint
+    _cp_status: RangeMap[CodePoint, Status | int]
     _mapped: dict[CodePoint, str]
+    _default_status = Status.DISALLOWED
 
     def __init__(
         self,
         *,
         valid: CodePointList,
         ignored: CodePointList,
+        offset: list[tuple[CodePointRange, int]],
         mapped: dict[CodePoint, str],
         data_version: str | None = None,
         unidata_version: str | None = None,
@@ -88,6 +94,7 @@ class Uts46MappingTable:
             chain(
                 _expand_codepoint_list(valid, Status.VALID),
                 _expand_codepoint_list(ignored, Status.IGNORED),
+                offset,
             )
         )
         self._mapped = mapped
@@ -102,7 +109,10 @@ class Uts46MappingTable:
         cp = ord(char)
         if cp in self._mapped:
             return Status.MAPPED
-        return self._cp_status.get(cp, Status.DISALLOWED)
+        _status = self._cp_status.get(cp, self._default_status)
+        if not isinstance(_status, Status):
+            _status = Status.MAPPED  # offset means mapped
+        return _status
 
     def is_valid(self, char: str) -> bool:
         """
@@ -119,13 +129,17 @@ class Uts46MappingTable:
         cp = ord(char)
         result = self._mapped.get(cp)
         if result is None:
-            status = self._cp_status.get(ord(char), Status.DISALLOWED)
+            status = self._cp_status.get(ord(char), self._default_status)
             if status in {Status.VALID, Status.DISALLOWED}:
                 result = char
             elif status == Status.IGNORED:
                 result = ""
+            elif not isinstance(status, Status):
+                result = chr(cp + status)  # offset
             else:
-                raise ValueError(f"Unknown status: {status}")
+                # Status.MAPPED was covered by _mapped or offset above.
+                # Status.DEVIATION should use VALID in non-transitional table.
+                raise ValueError(f"Unknown status for {cp:#06x}: {status!r}")
         return result
 
 
