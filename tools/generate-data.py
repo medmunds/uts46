@@ -89,6 +89,23 @@ class IdnaMappingEntry:
             f" status={self.status!r}{mapping_str}{line_num_str}{comment_str})"
         )
 
+    def merge(self, other: "IdnaMappingEntry") -> None:
+        """
+        Update self to combine other's start-end range and comment.
+
+        Caller is responsible for ensuring remaining properties are compatible.
+        """
+        self.start = min(self.start, other.start)
+        self.end = max(self.end, other.end)
+
+        if self.comment is None:
+            self.comment = other.comment
+        elif other.comment is not None:
+            # Merge comments.
+            left, *_ = self.comment.split("..")
+            *_, right = other.comment.rsplit("..")
+            self.comment = f"{left}..{right}"
+
 
 def parse_mapping_table(file_path: Path) -> list[IdnaMappingEntry]:
     """Parse the UTS46 mapping table data file."""
@@ -140,7 +157,7 @@ def extract_deviations(ranges: list[IdnaMappingEntry]) -> dict[CodePoint, str]:
     return deviations
 
 
-def optimize_ranges(ranges: list[IdnaMappingEntry]) -> None:
+def optimize_ranges(ranges: list[IdnaMappingEntry]) -> list[IdnaMappingEntry]:
     """
     Optimize the ranges in place by merging adjacent ranges.
     """
@@ -150,28 +167,17 @@ def optimize_ranges(ranges: list[IdnaMappingEntry]) -> None:
     ranges.sort(key=lambda r: r.start)
 
     # Merge adjacent ranges with same properties
-    i = 0
-    while i < len(ranges) - 1:
-        curr = ranges[i]
-        next_r = ranges[i + 1]
-        if (
-            curr.end + 1 == next_r.start
-            and curr.status == next_r.status
-            and curr.mapping == next_r.mapping
-        ):
-            # Merge ranges
-            curr.end = next_r.end
-            if curr.comment and next_r.comment:
-                left, *_ = curr.comment.split("..")
-                *_, right = next_r.comment.rsplit("..")
-                curr.comment = f"{left}..{right}"
-            elif next_r.comment:
-                curr.comment = f"..{next_r.comment}"
-            del ranges[i + 1]
+    result: list[IdnaMappingEntry] = []
+    last: IdnaMappingEntry | None = None
+    for curr in ranges:
+        if last and last.status == curr.status and last.mapping == curr.mapping:
+            last.merge(curr)
         else:
-            i += 1
+            result.append(curr)
+            last = curr
 
-    print(f"  {len(ranges)} ranges after merging", file=sys.stderr)
+    print(f"  {len(result)} ranges after merging", file=sys.stderr)
+    return result
 
 
 def generate_dict_arg(
@@ -352,7 +358,7 @@ def generate_data_file() -> None:
     )
     ranges = parse_mapping_table(mapping_path)
     deviations = extract_deviations(ranges)
-    optimize_ranges(ranges)
+    ranges = optimize_ranges(ranges)
 
     # Download and parse the joining types table
     joining_path, joining_url = udu.get_unicode_file(
