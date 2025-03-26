@@ -10,6 +10,12 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    strategy:
+      # Use a matrix to run and report on all checks separately
+      fail-fast: false
+      matrix:
+        check: ["ruff check", "ruff format", "mypy", "generate-data"]
+
     steps:
     - uses: actions/checkout@v4
 
@@ -24,20 +30,21 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install '.[lint]'
 
+    - name: ${{ matrix.check }}
+      if: ${{ matrix.check != 'generate-data' }}
+      run: python -m ${{ matrix.check }} .
+
     - name: Check generated data
-      # Verify the checked in _data.py matches what would be generated
+      if: ${{ matrix.check == 'generate-data' }}
+      # Verify the repo _data.py matches what would be generated
       run: |
         python tools/generate-data.py
-        git diff --exit-code src/uts46/_data.py
+        git diff --exit-code src/uts46/_data.py || {
+          echo "::error file=src/uts46/_data.py::" \
+            "generated _data.py is out of sync with generate-data script."
+          exit 1
+        }
 
-    - name: ruff check
-      run: python -m ruff check .
-
-    - name: ruff format
-      run: python -m ruff format --check .
-
-    - name: mypy
-      run: python -m mypy .
 
   build:
     runs-on: ubuntu-latest
