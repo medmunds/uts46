@@ -34,6 +34,14 @@ jobs:
       if: ${{ matrix.check != 'generate-data' }}
       run: python -m ${{ matrix.check }} .
 
+    - name: Restore Unicode data
+      if: ${{ matrix.check == 'generate-data' }}
+      uses: actions/cache/restore@v4
+      with:
+        path: data/
+        key: unicode-data-always-restore
+        restore-keys: unicode-data-
+
     - name: Check generated data
       if: ${{ matrix.check == 'generate-data' }}
       # Verify the repo _data.py matches what would be generated
@@ -132,11 +140,33 @@ jobs:
             ;;
         esac
 
+    - name: Restore Unicode data
+      id: restore-unicode-data
+      uses: actions/cache/restore@v4
+      with:
+        path: data/
+        key: unicode-data-always-restore
+        restore-keys: unicode-data-
+
     - name: Run tests
       # Ignore failures in pre-beta Python builds
       continue-on-error: ${{ steps.setup.outputs.python-release-level == 'alpha' }}
       run: |
         python -m unittest
+
+    - name: Cache Unicode data
+      uses: actions/cache/save@v4
+      # Avoid "Failed to save: Unable to reserve cache with key ___"
+      # warning when an earlier job correctly saved the cache
+      if: ${{
+          strategy.job-index == 0 && (
+            steps.restore-unicode-data.outputs.cache-matched-key
+            != format('unicode-data-{0}', hashFiles('data/**'))
+          )
+        }}
+      with:
+        path: data/
+        key: unicode-data-${{ hashFiles('data/**') }}
 
   publish:
     needs: [lint, build, test]
