@@ -338,7 +338,7 @@ def decode(
     check_joiners: bool = True,
     use_std3_ascii_rules: bool = True,
     transitional_processing: bool = False,
-    ignore_invalid_punycode: bool = True,
+    ignore_invalid_punycode: bool = False,
 ) -> str:
     """
     Convert an ASCII-encoded internationalized domain name to a Unicode string

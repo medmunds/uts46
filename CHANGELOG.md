@@ -1,5 +1,14 @@
 # uts46 changelog
 
+## In development
+
+*Unreleased changes*
+
+### Fixes
+
+* Change default `uts46.decode(..., ignore_invalid_punycode=False, ...)`.
+
+
 ## v0.2.0
 
 *2025-03-25*
