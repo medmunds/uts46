@@ -144,6 +144,12 @@ jobs:
         name: dist
         path: dist/
 
+    - name: Verify SHA digests
+      env:
+        CHECKSUMS: ${{ needs.build.outputs.checksums }}
+      run: |
+        echo "$CHECKSUMS" | shasum --algorithm 256 --portable --check -
+
     - name: Install distribution and test dependencies
       run: |
         wheels=(./dist/*.whl)
