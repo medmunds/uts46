@@ -93,7 +93,7 @@ jobs:
       id: checksum
       run: |
         echo "checksums<<EOF" >> $GITHUB_OUTPUT
-        shasum --algorithm 256 --portable dist/* | tee -a $GITHUB_OUTPUT
+        shasum --algorithm 256 dist/* | tee -a $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
 
     - name: Check metadata
@@ -148,7 +148,7 @@ jobs:
       env:
         CHECKSUMS: ${{ needs.build.outputs.checksums }}
       run: |
-        echo "$CHECKSUMS" | shasum --algorithm 256 --portable --check -
+        echo "$CHECKSUMS" | shasum --algorithm 256 --check -
 
     - name: Install distribution and test dependencies
       run: |
@@ -225,7 +225,7 @@ jobs:
       env:
         CHECKSUMS: ${{ needs.build.outputs.checksums }}
       run: |
-        echo "$CHECKSUMS" | shasum --algorithm 256 --portable --check -
+        echo "$CHECKSUMS" | shasum --algorithm 256 --check -
 
     - name: Publish to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
@@ -249,7 +249,7 @@ jobs:
       env:
         CHECKSUMS: ${{ needs.build.outputs.checksums }}
       run: |
-        echo "$CHECKSUMS" > dist/shasum-a256-portable.txt
+        echo "$CHECKSUMS" > dist/shasum-256.txt
 
     - name: Release to GitHub
       env:
