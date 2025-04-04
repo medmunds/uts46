@@ -5,11 +5,15 @@ on:
     branches: [ main ]
     tags: [ "v*" ]
   pull_request:
-    branches: [ main ]
+
+permissions: {}
 
 jobs:
   lint:
     runs-on: ubuntu-latest
+    permissions:
+      actions: write # actions/cache, actions/setup-python[cache]
+      contents: read # actions/checkout
     strategy:
       # Use a matrix to run and report on all checks separately
       fail-fast: false
@@ -18,10 +22,13 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
 
     - name: Set up Python 3.13
       uses: actions/setup-python@v5
       with:
+        # zizmor: ignore[cache-poisoning] - cache is not used for build/publish
         python-version: "3.13"
         cache: "pip"
 
@@ -53,20 +60,25 @@ jobs:
           exit 1
         }
 
-
   build:
     runs-on: ubuntu-latest
+    permissions:
+      actions: write # actions/upload-artifact
+      contents: read # actions/checkout
+    outputs:
+      checksums: ${{ steps.checksum.outputs.checksums }}
     steps:
     - uses: actions/checkout@v4
       with:
         # Need history for hatch-vcs to calculate version
         fetch-depth: 0
+        persist-credentials: false
 
     - name: Set up Python 3.13
       uses: actions/setup-python@v5
       with:
         python-version: "3.13"
-        cache: "pip"
+        # Don't use the cache for building
 
     - name: Install build dependencies
       run: |
@@ -77,6 +89,13 @@ jobs:
       run: |
         python -m build
 
+    - name: Compute SHA digests
+      id: checksum
+      run: |
+        echo "checksums<<EOF" >> $GITHUB_OUTPUT
+        shasum --algorithm 256 dist/* | tee -a $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
     - name: Check metadata
       run: |
         python -m twine check dist/*
@@ -86,11 +105,14 @@ jobs:
       with:
         name: dist
         path: dist/
-        retention-days: 7
+        if-no-files-found: error
 
   test:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      actions: write # actions/cache, actions/setup-python[cache]
+      contents: read # actions/checkout
     strategy:
       fail-fast: false
       matrix:
@@ -98,12 +120,15 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
 
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
         allow-prereleases: true
+        # zizmor: ignore[cache-poisoning] - cache is not used for build/publish
         cache: "pip"
 
     - name: Get Python info
@@ -156,9 +181,12 @@ jobs:
 
     - name: Cache Unicode data
       uses: actions/cache/save@v4
-      # Avoid "Failed to save: Unable to reserve cache with key ___"
-      # warning when an earlier job correctly saved the cache
+      # Update unicode-data cache only:
+      # - on pushes to the main branch
+      # - from the first job in the matrix (to avoid conflict warnings)
+      # - if data has changed
       if: ${{
+          github.event_name == 'push' && github.ref == 'refs/heads/main' &&
           strategy.job-index == 0 && (
             steps.restore-unicode-data.outputs.cache-matched-key
             != format('unicode-data-{0}', hashFiles('data/**'))
@@ -171,13 +199,13 @@ jobs:
   publish:
     needs: [lint, build, test]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     environment:
       name: pypi
       url: https://pypi.org/p/uts46
     permissions:
-      # Required for PyPI trusted publishing
-      id-token: write
+      actions: read # actions/download-artifact
+      id-token: write # pypa/gh-action-pypi-publish
 
     steps:
     - name: Download build artifacts
@@ -185,16 +213,24 @@ jobs:
       with:
         name: dist
         path: dist/
+
+    - name: Verify SHA digests
+      # Prevent named artifact tampering by untrusted test/lint jobs
+      env:
+        CHECKSUMS: ${{ needs.build.outputs.checksums }}
+      run: |
+        echo "$CHECKSUMS" | shasum --algorithm 256 --check -
 
     - name: Publish to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
 
   release:
-    needs: [publish]
+    needs: [build, publish]
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     permissions:
-      # Required for GitHub release
-      contents: write
+      actions: read # actions/download-artifact
+      contents: write # gh release
 
     steps:
     - name: Download build artifacts
@@ -202,6 +238,12 @@ jobs:
       with:
         name: dist
         path: dist/
+
+    - name: Include checksums
+      env:
+        CHECKSUMS: ${{ needs.build.outputs.checksums }}
+      run: |
+        echo "$CHECKSUMS" > dist/shasum-256.txt
 
     - name: Release to GitHub
       env:
