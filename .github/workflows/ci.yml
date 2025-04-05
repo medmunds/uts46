@@ -196,8 +196,38 @@ jobs:
         path: data/
         key: unicode-data-${{ hashFiles('data/**') }}
 
-  publish:
+  publish-testpypi:
     needs: [lint, build, test]
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' }}
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/uts46
+    permissions:
+      actions: read # actions/download-artifact
+      id-token: write # pypa/gh-action-pypi-publish
+
+    steps:
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: dist
+        path: dist/
+
+    - name: Verify SHA digests
+      # Prevent named artifact tampering by untrusted test/lint jobs
+      env:
+        CHECKSUMS: ${{ needs.build.outputs.checksums }}
+      run: |
+        echo "$CHECKSUMS" | shasum --algorithm 256 --check -
+
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        repository-url: https://test.pypi.org/legacy/
+
+  publish:
+    needs: [lint, build, test, publish-testpypi]
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     environment:
