@@ -54,6 +54,9 @@ dev = [
 
 [tool.hatch.version]
 source = "vcs"
+[tool.hatch.version.raw-options]
+# Local version prevents publishing development builds to TestPyPI
+local_scheme = "no-local-version"
 
 [tool.hatch.build.hooks.vcs]
 version-file = "src/uts46/_version.py"

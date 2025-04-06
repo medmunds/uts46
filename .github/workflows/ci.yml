@@ -221,7 +221,7 @@ jobs:
       run: |
         echo "$CHECKSUMS" | shasum --algorithm 256 --check -
 
-    - name: Publish to PyPI
+    - name: Publish to TestPyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         repository-url: https://test.pypi.org/legacy/
